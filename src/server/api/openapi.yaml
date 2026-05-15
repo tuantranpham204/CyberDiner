@@ -1,5 +1,486 @@
-openapi: 3.0.0
+openapi: 3.0.3
 info:
   title: CyberDiner API
   version: 1.0.0
-paths: {}
+  description: AI-powered food delivery system. Auth, ordering, delivery tracking, and admin APIs.
+  contact:
+    name: CyberDiner Team
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: Auth
+    description: Authentication and account registration (UC-01, UC-02, UC-03)
+  - name: Profile
+    description: Personal account profile management (UC-04)
+  - name: System
+    description: Health and infrastructure
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /api/v1/profile/{id}:
+    get:
+      tags: [Profile]
+      summary: Get a user's full profile by user id (UC-04)
+      description: |
+        Returns the joined `users` + `profiles` record identified by `id`.
+        Requires authentication.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+          example: 1
+      responses:
+        '200':
+          description: Profile retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '400':
+          description: Path id is not a positive integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No user with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/profile:
+    patch:
+      tags: [Profile]
+      summary: Update the authenticated user's profile (UC-04)
+      description: |
+        Partial update — only fields explicitly supplied are applied. Pass
+        an empty string to clear `phone_number` or `address`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+            examples:
+              changeNumber:
+                summary: Update phone and address
+                value:
+                  phone_number: "+84 912 345 678"
+                  address: "12 Trần Hưng Đạo, Hà Nội"
+              renameOnly:
+                summary: Update display name
+                value:
+                  name: Tuấn
+                  surname: Trần
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '400':
+          description: Body did not contain updatable fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Field-level validation failure (e.g. invalid phone)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidPhone:
+                  value:
+                    code: 422
+                    message: One or more fields are invalid
+                    error:
+                      phone_number: must be a valid phone number
+
+  /api/v1/auth/sign-out:
+    post:
+      tags: [Auth]
+      summary: Revoke the current session JWT (UC-03)
+      description: |
+        Adds the supplied JWT's identifier (jti) to the server-side denylist
+        with a TTL equal to its remaining lifetime. Subsequent requests carrying
+        the same token will be rejected with `TOKEN_REVOKED`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              examples:
+                ok:
+                  value:
+                    code: 200
+                    message: Signed out successfully
+        '401':
+          description: Missing, invalid, expired, or already-revoked token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing:
+                  value:
+                    code: 401
+                    message: Authorization header is missing or malformed.
+                invalid:
+                  value:
+                    code: 401
+                    message: Token is invalid or expired.
+                revoked:
+                  value:
+                    code: 401
+                    message: Session has been revoked. Please sign in again.
+
+  /api/v1/auth/sign-in:
+    post:
+      tags: [Auth]
+      summary: Authenticate an existing user (UC-02)
+      description: |
+        Verifies the username/password pair and issues a fresh JWT for the session.
+        Rejects banned or inactive accounts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignInRequest'
+            examples:
+              valid:
+                summary: Valid credentials
+                value:
+                  username: tuantran204
+                  password: StrongP@ss1
+      responses:
+        '200':
+          description: Authenticated, JWT issued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthData'
+        '401':
+          description: Username or password is incorrect
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid:
+                  value:
+                    code: 401
+                    message: Username or password is incorrect.
+        '403':
+          description: Account banned or inactive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                banned:
+                  value:
+                    code: 403
+                    message: This account has been suspended. Please contact support.
+        '422':
+          description: Validation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/sign-up:
+    post:
+      tags: [Auth]
+      summary: Register a new user account (UC-01)
+      description: |
+        Creates a new user (role=`user`) together with their profile in a single transaction,
+        then issues an initial JWT for the session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignUpRequest'
+            examples:
+              valid:
+                summary: Valid registration
+                value:
+                  name: Tuan
+                  surname: Tran
+                  username: tuantran204
+                  email: tuan@example.com
+                  dob: 2002-04-20
+                  gender: male
+                  password: StrongP@ss1
+                  confirm_password: StrongP@ss1
+      responses:
+        '201':
+          description: Account created, JWT issued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthData'
+              examples:
+                ok:
+                  value:
+                    code: 201
+                    message: Account created successfully
+                    data:
+                      token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                      user:
+                        id: 6f1b...
+                        username: tuantran204
+                        email: tuan@example.com
+                        role: user
+                        name: Tuan
+                        surname: Tran
+                        gender: male
+                        dob: 2002-04-20
+                        created_at: 2026-05-15T10:00:00Z
+        '400':
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Email already registered or username taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                emailExists:
+                  value:
+                    code: 409
+                    message: An account with this email already exists. Please sign in instead.
+                usernameTaken:
+                  value:
+                    code: 409
+                    message: This username is already taken.
+        '422':
+          description: Validation failure (field-level errors)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                validation:
+                  value:
+                    code: 422
+                    message: One or more fields are invalid
+                    error:
+                      email: must be a valid email address
+                      password: must be 8-72 chars and include upper, lower, digit, and special character
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    SignInRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          pattern: '^[a-zA-Z0-9._-]{3,30}$'
+          example: tuantran204
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 72
+
+    SignUpRequest:
+      type: object
+      required: [name, surname, username, email, dob, gender, password, confirm_password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          example: Tuan
+        surname:
+          type: string
+          minLength: 1
+          maxLength: 50
+          example: Tran
+        username:
+          type: string
+          pattern: '^[a-zA-Z0-9._-]{3,30}$'
+          example: tuantran204
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        dob:
+          type: string
+          format: date
+          example: 2002-04-20
+        gender:
+          type: string
+          enum: [male, female, other, prefer_not_to_say]
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: Must include upper, lower, digit, and special character.
+        confirm_password:
+          type: string
+          format: password
+
+    User:
+      type: object
+      description: |
+        Full account + profile view. Returned by `/auth/sign-up`, `/auth/sign-in`,
+        and the `/profile` endpoints. Joins fields from the `users` table
+        (id, username, email, role, is_active, is_banned, timestamps) with
+        the one-to-one `profiles` row (name, surname, gender, dob, phone,
+        address).
+      properties:
+        id:           { type: integer, format: int64, example: 1 }
+        username:     { type: string }
+        email:        { type: string, format: email }
+        role:         { type: string, enum: [user, staff, delivery_man, admin] }
+        is_active:    { type: boolean }
+        is_banned:    { type: boolean }
+        name:         { type: string }
+        surname:      { type: string }
+        gender:       { type: string, enum: [male, female, other, prefer_not_to_say] }
+        dob:          { type: string, format: date }
+        phone_number:
+          type: string
+          nullable: true
+          pattern: '^(?:\+84|0)\d{9}$'
+          description: Vietnamese phone number. Spaces, dashes and parentheses are accepted in input and stripped.
+          example: "0912345678"
+        address:      { type: string, nullable: true, example: "12 Trần Hưng Đạo, Hà Nội" }
+        created_at:   { type: string, format: date-time }
+        updated_at:   { type: string, format: date-time }
+
+    UpdateProfileRequest:
+      type: object
+      description: All fields are optional; only supplied keys are applied.
+      properties:
+        name:         { type: string, maxLength: 50 }
+        surname:      { type: string, maxLength: 50 }
+        phone_number:
+          type: string
+          description: |
+            Vietnamese phone number — starts with `0` or `+84` followed by 9 digits.
+            Spaces, dashes and parentheses are accepted and stripped before validation.
+            Pass an empty string to clear.
+          example: "0912345678"
+        address:
+          type: string
+          maxLength: 500
+          description: Pass an empty string to clear.
+
+    AuthData:
+      type: object
+      properties:
+        token: { type: string, description: JWT (HS256) }
+        user:  { $ref: '#/components/schemas/User' }
+
+    SuccessResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:    { type: integer, example: 200, description: HTTP status code mirrored into the body }
+        message: { type: string }
+        data:    { description: Endpoint-specific payload }
+
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:    { type: integer, example: 422, description: HTTP status code mirrored into the body }
+        message: { type: string }
+        error:
+          description: Optional details (e.g. field-level validation errors).
+          oneOf:
+            - type: object
+              additionalProperties: { type: string }
+            - type: string
+        data: { description: Optional context payload }
+
+    PaginatedResponse:
+      type: object
+      required: [code, message, data, meta]
+      properties:
+        code:    { type: integer, example: 200 }
+        message: { type: string }
+        data:
+          type: array
+          items: { type: object }
+        meta:
+          type: object
+          properties:
+            page:        { type: integer, example: 1 }
+            page_size:   { type: integer, example: 20 }
+            total:       { type: integer, example: 137 }
+            total_pages: { type: integer, example: 7 }

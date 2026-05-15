@@ -1,2 +1,27 @@
 server:
   port: 8080
+  mode: debug
+
+database:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: secret
+  name: cyberdiner
+  sslmode: disable
+
+jwt:
+  secret: change-me-in-env
+  expirationHours: 72
+  issuer: cyberdiner
+
+cors:
+  allowedOrigins:
+    - http://localhost:5173
+    - http://localhost:3000
+
+docs:
+  specPath: ./api/openapi.yaml
+
+redis:
+  url: redis://localhost:6379/0
